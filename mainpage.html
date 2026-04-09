@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NOAA Tornado Watch & Outlook Map</title>
+    <title>Real Tornado Forecast & Watch Map</title>
+    <title>Tornado Watch Forecaster Map</title>
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -17,6 +19,10 @@
         --card: #13203c;
         --text: #edf3ff;
         --muted: #a9b9d8;
+        --bg: #0b1220;
+        --card: #111a2e;
+        --text: #ecf1ff;
+        --muted: #9fb0d3;
         --accent: #4aa3ff;
       }
 
@@ -44,6 +50,24 @@
 
       .subtitle {
         margin: 0;
+        background: radial-gradient(circle at top, #17294d, var(--bg));
+        color: var(--text);
+        min-height: 100vh;
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 1rem auto;
+        padding: 0 1rem 2rem;
+      }
+
+      h1 {
+        margin: 0.35rem 0;
+        font-size: 1.6rem;
+      }
+
+      .subtitle {
+        margin: 0 0 1rem;
         color: var(--muted);
       }
 
@@ -58,6 +82,32 @@
       .controls {
         display: flex;
         gap: 0.6rem;
+        background: color-mix(in oklab, var(--card), black 15%);
+        border: 1px solid color-mix(in oklab, var(--muted), transparent 65%);
+        border-radius: 12px;
+        padding: 0.9rem;
+        margin-bottom: 0.9rem;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.8rem;
+      }
+
+      label {
+        display: block;
+        font-size: 0.9rem;
+      }
+
+      input[type='range'] {
+        width: 100%;
+      }
+
+      .button-row {
+        display: flex;
+        align-items: flex-end;
+        gap: 0.65rem;
         flex-wrap: wrap;
       }
 
@@ -80,6 +130,21 @@
       #map {
         margin-top: 0.9rem;
         height: 600px;
+        background: var(--accent);
+        color: #081830;
+        font-weight: 700;
+        cursor: pointer;
+        border-radius: 10px;
+        padding: 0.55rem 0.8rem;
+      }
+
+      #status {
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+
+      #map {
+        height: 560px;
         border-radius: 12px;
         overflow: hidden;
         border: 1px solid color-mix(in oklab, var(--muted), transparent 70%);
@@ -105,6 +170,21 @@
 
       code {
         color: #cae0ff;
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.6rem;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      .swatch {
+        width: 1rem;
+        height: 1rem;
+        border-radius: 3px;
+        display: inline-block;
+        margin-right: 0.35rem;
+        vertical-align: middle;
       }
     </style>
   </head>
@@ -114,6 +194,14 @@
       <p class="subtitle">
         Real-data overlays only: active Tornado Watches from <code>api.weather.gov</code> and Day 1
         SPC tornado outlook polygons from <code>spc.noaa.gov</code>. No synthetic forecast model is used.
+      <h1>Real Tornado Forecast Data Map</h1>
+      <p class="subtitle">
+        Live overlays from government and open-source feeds: <code>api.weather.gov</code> active
+        Tornado Watches and the Iowa State Mesonet mirror of NOAA SPC tornado outlook polygons.
+      <h1>COD:Forecasters Tornado Watch Map</h1>
+      <p class="subtitle">
+        Demo forecast model that projects tornado watch hotspots over the U.S. using a lightweight
+        <code>cod:forecasters</code> style scoring pipeline.
       </p>
 
       <section class="panel">
@@ -123,6 +211,11 @@
           <button id="clearMap">Clear Overlays</button>
         </div>
         <p id="status">Loading live NOAA feeds…</p>
+          <button id="refreshData">Refresh Real Data</button>
+          <button id="fitUsView">Fit Continental U.S.</button>
+          <button id="clearMap">Clear Overlays</button>
+        </div>
+        <p id="status">Loading live tornado watch and outlook layers…</p>
       </section>
 
       <section class="panel">
@@ -130,6 +223,43 @@
         <div class="legend">
           <span><span class="swatch" style="background:#e63946"></span>NWS Tornado Watch (active)</span>
           <span><span class="swatch" style="background:#ff8f1f"></span>SPC Tornado Outlook Area</span>
+          <span><span class="swatch" style="background:#e63946"></span>NWS Tornado Watch (government)</span>
+          <span><span class="swatch" style="background:#f4a261"></span>SPC Tornado Outlook 2%</span>
+          <span><span class="swatch" style="background:#ff8f1f"></span>SPC Tornado Outlook 5%</span>
+          <span><span class="swatch" style="background:#ffd60a"></span>SPC Tornado Outlook 10%+</span>
+          <label>
+            Hours Ahead: <strong id="hoursValue">6</strong>
+            <input id="hours" type="range" min="1" max="24" value="6" />
+          </label>
+          <label>
+            Instability CAPE
+            <input id="cape" type="range" min="800" max="4500" value="2600" />
+            <small><span id="capeValue">2600</span> J/kg</small>
+          </label>
+          <label>
+            Wind Shear (0-6 km)
+            <input id="shear" type="range" min="20" max="90" value="55" />
+            <small><span id="shearValue">55</span> kt</small>
+          </label>
+          <label>
+            Surface Dewpoint
+            <input id="dewpoint" type="range" min="50" max="78" value="65" />
+            <small><span id="dewpointValue">65</span> °F</small>
+          </label>
+          <div class="button-row">
+            <button id="runForecast">Run Forecast</button>
+            <button id="clearWatches">Clear Watches</button>
+          </div>
+        </div>
+        <p id="status">Adjust inputs and run the model.</p>
+      </section>
+
+      <section class="panel">
+        <div id="map" aria-label="Forecast map"></div>
+        <div class="legend">
+          <span><span class="swatch" style="background:#f9d923"></span>Low watch likelihood</span>
+          <span><span class="swatch" style="background:#ff8f1f"></span>Moderate watch likelihood</span>
+          <span><span class="swatch" style="background:#e63946"></span>High watch likelihood</span>
         </div>
       </section>
     </main>
@@ -141,6 +271,9 @@
     ></script>
     <script>
       const map = L.map('map', { zoomControl: true }).setView([38.8, -96.5], 4);
+      const map = L.map('map', {
+        zoomControl: true
+      }).setView([37.8, -96], 4);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
@@ -158,6 +291,30 @@
           'https://www.spc.noaa.gov/products/outlook/day1otlk_cat.lyr.geojson'
         ]
       };
+
+        spcTornadoOutlook: 'https://mesonet.agron.iastate.edu/geojson/spc_outlook.py?day=1&cat=torn'
+      };
+
+      const SPC_STYLE_BY_THRESHOLD = {
+        2: '#f4a261',
+        5: '#ff8f1f',
+        10: '#ffd60a',
+        15: '#ffe45e',
+        30: '#f72585',
+        45: '#7209b7',
+        60: '#560bad'
+      };
+
+      function styleSpcFeature(feature) {
+        const threshold = Number(feature?.properties?.threshold || 2);
+        const color = SPC_STYLE_BY_THRESHOLD[threshold] || '#f4a261';
+        return {
+          color,
+          weight: 1.5,
+          fillColor: color,
+          fillOpacity: 0.24
+        };
+      }
 
       async function fetchJson(url) {
         const response = await fetch(url, {
@@ -208,6 +365,9 @@
                 `Issued: ${p.sent ? new Date(p.sent).toLocaleString() : 'Unknown'}<br/>` +
                 `Expires: ${p.ends ? new Date(p.ends).toLocaleString() : 'Unknown'}<br/>` +
                 `Source: ${p.senderName || 'National Weather Service'}`
+                `Sent: ${p.sent ? new Date(p.sent).toLocaleString() : 'Unknown'}<br/>` +
+                `Ends: ${p.ends ? new Date(p.ends).toLocaleString() : 'Unknown'}<br/>` +
+                `${p.senderName || 'NWS'}`
             );
           }
         });
@@ -240,6 +400,25 @@
                 `Issued: ${issue}<br/>` +
                 `Expires: ${expire}<br/>` +
                 `Feed: ${url}`
+      async function loadSpcTornadoOutlook() {
+        outlookLayer.clearLayers();
+
+        const data = await fetchJson(FEEDS.spcTornadoOutlook);
+        const features = Array.isArray(data.features) ? data.features : [];
+
+        const layer = L.geoJSON(features, {
+          style: styleSpcFeature,
+          onEachFeature: (feature, featureLayer) => {
+            const p = feature.properties || {};
+            const threshold = p.threshold || 'N/A';
+            const issue = p.ISSUE || p.issue || p.valid;
+            const expire = p.EXPIRE || p.expire;
+            featureLayer.bindPopup(
+              `<strong>SPC Tornado Outlook Day 1</strong><br/>` +
+                `Threshold: ${threshold}%<br/>` +
+                `Issued: ${issue || 'Unknown'}<br/>` +
+                `Expires: ${expire || 'Unknown'}<br/>` +
+                `Source: Iowa State Mesonet / NOAA SPC`
             );
           }
         });
@@ -288,6 +467,43 @@
           status.textContent =
             `Failed to load one or more NOAA feeds: ${error.message}. ` +
             `The feed may be unavailable, blocked, or temporarily rate-limited.`;
+        return features.length;
+      }
+
+      async function refreshAllData() {
+        status.textContent = 'Refreshing live feeds…';
+
+        try {
+          const [watchCount, outlookCount] = await Promise.all([
+            loadNwsTornadoWatches(),
+            loadSpcTornadoOutlook()
+          ]);
+
+          const layerBounds = [];
+          if (watchLayer.getLayers().length > 0) {
+            layerBounds.push(watchLayer.getBounds());
+          }
+          if (outlookLayer.getLayers().length > 0) {
+            layerBounds.push(outlookLayer.getBounds());
+          }
+
+          if (layerBounds.length > 0) {
+            const combined = layerBounds[0];
+            for (let i = 1; i < layerBounds.length; i += 1) {
+              combined.extend(layerBounds[i]);
+            }
+            map.fitBounds(combined.pad(0.2));
+          }
+
+          status.textContent =
+            `Updated ${new Date().toLocaleString()}: ` +
+            `${watchCount} active Tornado Watch polygons (NWS) and ` +
+            `${outlookCount} SPC tornado outlook polygons (Mesonet/SPC).`;
+        } catch (error) {
+          console.error(error);
+          status.textContent =
+            `Failed to load one or more live feeds: ${error.message}. ` +
+            `This can happen if the feed is temporarily unavailable or blocked by network/CORS.`;
         }
       }
 
@@ -300,6 +516,143 @@
       });
 
       refreshAllData();
+      const watchLayer = L.layerGroup().addTo(map);
+
+      const gridAnchors = [
+        { name: 'North Texas', lat: 33.4, lon: -97.1 },
+        { name: 'Central Oklahoma', lat: 35.4, lon: -97.3 },
+        { name: 'Eastern Kansas', lat: 38.4, lon: -95.6 },
+        { name: 'Missouri Bootheel', lat: 36.7, lon: -89.7 },
+        { name: 'Ark-La-Tex', lat: 33.2, lon: -93.8 },
+        { name: 'Western Tennessee', lat: 35.9, lon: -88.6 },
+        { name: 'Northern Mississippi', lat: 34.9, lon: -89.9 },
+        { name: 'Central Alabama', lat: 32.8, lon: -86.8 },
+        { name: 'Eastern Nebraska', lat: 41.1, lon: -96.2 },
+        { name: 'Southern Iowa', lat: 40.9, lon: -93.3 }
+      ];
+
+      class CodForecastersModel {
+        constructor(modelId = 'cod:forecasters/tornado-watch-v1') {
+          this.modelId = modelId;
+        }
+
+        scoreAnchor(anchor, inputs, index) {
+          const normalizedCape = (inputs.cape - 800) / (4500 - 800);
+          const normalizedShear = (inputs.shear - 20) / (90 - 20);
+          const normalizedDewpoint = (inputs.dewpoint - 50) / (78 - 50);
+          const diurnalBias = 0.6 + 0.4 * Math.sin((inputs.hours / 24) * Math.PI);
+          const spatialWave = 0.5 + 0.5 * Math.sin((anchor.lat + anchor.lon + index * 7) * 0.16);
+
+          const raw =
+            normalizedCape * 0.38 +
+            normalizedShear * 0.37 +
+            normalizedDewpoint * 0.18 +
+            diurnalBias * 0.07;
+
+          return Math.max(0.03, Math.min(0.98, raw * 0.86 + spatialWave * 0.14));
+        }
+
+        classify(probability) {
+          if (probability >= 0.7) {
+            return { label: 'High', color: '#e63946', radiusKm: 130 };
+          }
+          if (probability >= 0.45) {
+            return { label: 'Moderate', color: '#ff8f1f', radiusKm: 105 };
+          }
+          return { label: 'Low', color: '#f9d923', radiusKm: 80 };
+        }
+
+        forecast(inputs) {
+          return gridAnchors.map((anchor, i) => {
+            const probability = this.scoreAnchor(anchor, inputs, i);
+            const level = this.classify(probability);
+            return {
+              ...anchor,
+              probability,
+              ...level,
+              validAt: new Date(Date.now() + inputs.hours * 60 * 60 * 1000)
+            };
+          });
+        }
+      }
+
+      const model = new CodForecastersModel();
+
+      const fields = {
+        hours: document.getElementById('hours'),
+        cape: document.getElementById('cape'),
+        shear: document.getElementById('shear'),
+        dewpoint: document.getElementById('dewpoint')
+      };
+
+      const values = {
+        hours: document.getElementById('hoursValue'),
+        cape: document.getElementById('capeValue'),
+        shear: document.getElementById('shearValue'),
+        dewpoint: document.getElementById('dewpointValue')
+      };
+
+      Object.entries(fields).forEach(([name, element]) => {
+        element.addEventListener('input', () => {
+          values[name].textContent = element.value;
+        });
+      });
+
+      function renderForecast(entries) {
+        watchLayer.clearLayers();
+
+        entries.forEach((entry) => {
+          const radiusMeters = entry.radiusKm * 1000;
+          L.circle([entry.lat, entry.lon], {
+            radius: radiusMeters,
+            color: entry.color,
+            fillColor: entry.color,
+            fillOpacity: 0.32,
+            weight: 1.5
+          })
+            .bindPopup(
+              `<strong>${entry.name}</strong><br/>` +
+                `Watch likelihood: ${(entry.probability * 100).toFixed(0)}% (${entry.label})<br/>` +
+                `Valid: ${entry.validAt.toLocaleString()}`
+            )
+            .addTo(watchLayer);
+        });
+      }
+
+      function getInputs() {
+        return {
+          hours: Number(fields.hours.value),
+          cape: Number(fields.cape.value),
+          shear: Number(fields.shear.value),
+          dewpoint: Number(fields.dewpoint.value)
+        };
+      }
+
+      const runButton = document.getElementById('runForecast');
+      const clearButton = document.getElementById('clearWatches');
+      const status = document.getElementById('status');
+
+      runButton.addEventListener('click', () => {
+        const inputs = getInputs();
+        const watches = model.forecast(inputs);
+        renderForecast(watches);
+
+        const highCount = watches.filter((w) => w.label === 'High').length;
+        const moderateCount = watches.filter((w) => w.label === 'Moderate').length;
+        const lowCount = watches.length - highCount - moderateCount;
+
+        status.textContent =
+          `Model ${model.modelId} generated ${watches.length} watch zones ` +
+          `(high: ${highCount}, moderate: ${moderateCount}, low: ${lowCount}) ` +
+          `for +${inputs.hours}h outlook.`;
+      });
+
+      clearButton.addEventListener('click', () => {
+        watchLayer.clearLayers();
+        status.textContent = 'Watches cleared. Adjust inputs and run the model.';
+      });
+
+      runButton.click();
     </script>
   </body>
 </html>
