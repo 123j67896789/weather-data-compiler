@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NOAA Tornado Watch & Outlook Map</title>
     <title>Real Tornado Forecast & Watch Map</title>
     <title>Tornado Watch Forecaster Map</title>
     <link
@@ -189,6 +190,10 @@
   </head>
   <body>
     <main>
+      <h1>NOAA/NWS Real-Time Tornado Watch Map</h1>
+      <p class="subtitle">
+        Real-data overlays only: active Tornado Watches from <code>api.weather.gov</code> and Day 1
+        SPC tornado outlook polygons from <code>spc.noaa.gov</code>. No synthetic forecast model is used.
       <h1>Real Tornado Forecast Data Map</h1>
       <p class="subtitle">
         Live overlays from government and open-source feeds: <code>api.weather.gov</code> active
@@ -201,6 +206,11 @@
 
       <section class="panel">
         <div class="controls">
+          <button id="refreshData">Refresh NOAA Data</button>
+          <button id="fitUsView">Fit Continental U.S.</button>
+          <button id="clearMap">Clear Overlays</button>
+        </div>
+        <p id="status">Loading live NOAA feeds…</p>
           <button id="refreshData">Refresh Real Data</button>
           <button id="fitUsView">Fit Continental U.S.</button>
           <button id="clearMap">Clear Overlays</button>
@@ -211,6 +221,8 @@
       <section class="panel">
         <div id="map" aria-label="Live tornado forecast map"></div>
         <div class="legend">
+          <span><span class="swatch" style="background:#e63946"></span>NWS Tornado Watch (active)</span>
+          <span><span class="swatch" style="background:#ff8f1f"></span>SPC Tornado Outlook Area</span>
           <span><span class="swatch" style="background:#e63946"></span>NWS Tornado Watch (government)</span>
           <span><span class="swatch" style="background:#f4a261"></span>SPC Tornado Outlook 2%</span>
           <span><span class="swatch" style="background:#ff8f1f"></span>SPC Tornado Outlook 5%</span>
@@ -274,6 +286,12 @@
 
       const FEEDS = {
         nwsTornadoWatches: 'https://api.weather.gov/alerts/active?event=Tornado%20Watch',
+        spcTornadoOutlookCandidates: [
+          'https://www.spc.noaa.gov/products/outlook/day1otlk_torn.lyr.geojson',
+          'https://www.spc.noaa.gov/products/outlook/day1otlk_cat.lyr.geojson'
+        ]
+      };
+
         spcTornadoOutlook: 'https://mesonet.agron.iastate.edu/geojson/spc_outlook.py?day=1&cat=torn'
       };
 
@@ -312,6 +330,20 @@
         return response.json();
       }
 
+      async function fetchFirstAvailable(urls) {
+        let lastError;
+        for (const url of urls) {
+          try {
+            const payload = await fetchJson(url);
+            return { url, payload };
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        throw lastError || new Error('No feed URL could be loaded.');
+      }
+
       async function loadNwsTornadoWatches() {
         watchLayer.clearLayers();
 
@@ -330,6 +362,9 @@
             featureLayer.bindPopup(
               `<strong>${p.event || 'Tornado Watch'}</strong><br/>` +
                 `${p.areaDesc || 'Area unavailable'}<br/>` +
+                `Issued: ${p.sent ? new Date(p.sent).toLocaleString() : 'Unknown'}<br/>` +
+                `Expires: ${p.ends ? new Date(p.ends).toLocaleString() : 'Unknown'}<br/>` +
+                `Source: ${p.senderName || 'National Weather Service'}`
                 `Sent: ${p.sent ? new Date(p.sent).toLocaleString() : 'Unknown'}<br/>` +
                 `Ends: ${p.ends ? new Date(p.ends).toLocaleString() : 'Unknown'}<br/>` +
                 `${p.senderName || 'NWS'}`
@@ -341,6 +376,30 @@
         return features.length;
       }
 
+      async function loadSpcOutlook() {
+        outlookLayer.clearLayers();
+
+        const { url, payload } = await fetchFirstAvailable(FEEDS.spcTornadoOutlookCandidates);
+        const features = Array.isArray(payload.features) ? payload.features : [];
+
+        const layer = L.geoJSON(features, {
+          style: {
+            color: '#ff8f1f',
+            weight: 1.8,
+            fillColor: '#ff8f1f',
+            fillOpacity: 0.2
+          },
+          onEachFeature: (feature, featureLayer) => {
+            const p = feature.properties || {};
+            const threshold = p.threshold || p.DN || 'N/A';
+            const issue = p.ISSUE || p.issue || p.valid || 'Unknown';
+            const expire = p.EXPIRE || p.expire || 'Unknown';
+            featureLayer.bindPopup(
+              `<strong>SPC Day 1 Outlook</strong><br/>` +
+                `Threshold: ${threshold}${String(threshold).includes('%') ? '' : '%'}<br/>` +
+                `Issued: ${issue}<br/>` +
+                `Expires: ${expire}<br/>` +
+                `Feed: ${url}`
       async function loadSpcTornadoOutlook() {
         outlookLayer.clearLayers();
 
@@ -365,6 +424,49 @@
         });
 
         layer.addTo(outlookLayer);
+        return { count: features.length, feedUrl: url };
+      }
+
+      function fitToDataBounds() {
+        const layerBounds = [];
+
+        if (watchLayer.getLayers().length > 0) {
+          layerBounds.push(watchLayer.getBounds());
+        }
+        if (outlookLayer.getLayers().length > 0) {
+          layerBounds.push(outlookLayer.getBounds());
+        }
+
+        if (layerBounds.length === 0) {
+          return;
+        }
+
+        const combined = layerBounds[0];
+        for (let i = 1; i < layerBounds.length; i += 1) {
+          combined.extend(layerBounds[i]);
+        }
+
+        map.fitBounds(combined.pad(0.2));
+      }
+
+      async function refreshAllData() {
+        status.textContent = 'Refreshing NOAA feeds…';
+
+        try {
+          const [watchCount, outlookResult] = await Promise.all([loadNwsTornadoWatches(), loadSpcOutlook()]);
+
+          fitToDataBounds();
+
+          status.textContent =
+            `Updated ${new Date().toLocaleString()}: ` +
+            `${watchCount} active NWS Tornado Watch polygons and ` +
+            `${outlookResult.count} SPC outlook polygons loaded. ` +
+            `SPC source: ${outlookResult.feedUrl}`;
+        } catch (error) {
+          console.error(error);
+          status.textContent =
+            `Failed to load one or more NOAA feeds: ${error.message}. ` +
+            `The feed may be unavailable, blocked, or temporarily rate-limited.`;
         return features.length;
       }
 
